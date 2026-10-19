@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <string>
 #include <stdexcept>
 
 namespace reflash {
@@ -36,6 +37,7 @@ public:
     float read_fixed8();
 
     SWFRect read_rect();
+    std::string read_string();
 
     size_t tell() const { return byte_offset_; }
     void seek(size_t byte_offset);
@@ -45,7 +47,7 @@ private:
     const uint8_t* data_{nullptr};
     size_t size_{0};
     size_t byte_offset_{0};
-    uint8_t bit_offset_{0}; // 0..7 (0 means aligned to MSB of current byte)
+    uint8_t bit_offset_{0}; // 0..7
 };
 
 } // namespace reflash

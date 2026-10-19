@@ -17,6 +17,12 @@ enum class SWFSignature {
     Unknown
 };
 
+enum class FrameCommandType {
+    PlaceObject,
+    RemoveObject,
+    DoAction
+};
+
 struct PlaceObject2Data {
     bool flag_move{false};
     bool has_character{false};
@@ -40,10 +46,40 @@ struct PlaceObject2Data {
     // Color transform with alpha
     float r_mult{1.0f}, g_mult{1.0f}, b_mult{1.0f}, a_mult{1.0f};
     float r_add{0.0f}, g_add{0.0f}, b_add{0.0f}, a_add{0.0f};
+    uint8_t blend_mode{0}; // 0 = default/Normal
 };
 
-struct PlaceObject3Data : public PlaceObject2Data {
-    uint8_t blend_mode{1}; // 1 = Normal
+struct FrameCommand {
+    FrameCommandType type{FrameCommandType::PlaceObject};
+    uint16_t depth{0};
+    uint16_t character_id{0};
+    PlaceObject2Data place_data;
+    std::vector<uint8_t> action_bytecode;
+};
+
+struct TimelineFrame {
+    uint32_t frame_index{0};
+    std::vector<FrameCommand> commands;
+};
+
+struct JPEGAsset {
+    uint16_t character_id{0};
+    std::vector<uint8_t> image_data;
+    std::vector<uint8_t> alpha_data; // JPEG3 alpha channel
+    uint32_t texture_id{0};
+};
+
+struct SWFTag {
+    uint16_t code{0};
+    uint32_t length{0};
+    size_t header_offset{0};
+    size_t payload_offset{0};
+};
+
+struct DefineSpriteData {
+    uint16_t sprite_id{0};
+    uint16_t frame_count{0};
+    std::vector<SWFTag> sub_tags;
 };
 
 struct FileAttributesData {
@@ -54,21 +90,10 @@ struct FileAttributesData {
     bool use_network{false};
 };
 
-struct DoActionData {
-    std::vector<uint8_t> bytecode;
-};
-
 struct DoABCData {
     uint32_t flags{0};
     std::string name;
     std::vector<uint8_t> bytecode;
-};
-
-struct SWFTag {
-    uint16_t code{0};
-    uint32_t length{0};
-    size_t header_offset{0};
-    size_t payload_offset{0};
 };
 
 struct SWFHeader {
@@ -77,6 +102,7 @@ struct SWFHeader {
     uint32_t file_length{0};
     SWFRect frame_size;
     float frame_rate{0.0f};
+    uint16_t frame_rate_fixed8{0}; // Original 8.8 fixed point value
     uint16_t frame_count{0};
 };
 
@@ -90,9 +116,15 @@ public:
     uint32_t bg_color() const { return bg_color_; }
     uint8_t as_version() const { return is_as3_ ? 2 : 1; }
     bool is_as3() const { return is_as3_; }
+    uint32_t frame_interval_ms() const;
 
     const std::vector<SWFTag>& tags() const { return tags_; }
     const std::unordered_map<uint16_t, uint32_t>& tag_counts() const { return tag_counts_; }
+
+    const std::unordered_map<uint16_t, JPEGAsset>& jpeg_assets() const { return jpeg_assets_; }
+    const std::unordered_map<uint16_t, DefineSpriteData>& sprites() const { return sprites_; }
+    const std::unordered_map<uint16_t, std::string>& symbol_classes() const { return symbol_classes_; }
+    const std::vector<TimelineFrame>& timeline_frames() const { return timeline_frames_; }
 
 private:
     SWFHeader header_;
@@ -102,6 +134,14 @@ private:
 
     std::vector<SWFTag> tags_;
     std::unordered_map<uint16_t, uint32_t> tag_counts_;
+
+    // Assets & Symbol Mappings
+    std::unordered_map<uint16_t, JPEGAsset> jpeg_assets_;
+    std::unordered_map<uint16_t, DefineSpriteData> sprites_;
+    std::unordered_map<uint16_t, std::string> symbol_classes_;
+
+    // Timeline deferred commands per frame
+    std::vector<TimelineFrame> timeline_frames_;
 
     bool decompress_zlib(const uint8_t* src, size_t src_len, uint32_t expected_uncompressed_len);
     void parse_tags(SWFStream& stream);
@@ -126,6 +166,7 @@ REFLASH_EXPORT int reflash_get_frame_count();
 REFLASH_EXPORT int reflash_get_version();
 REFLASH_EXPORT int reflash_get_as_version();
 REFLASH_EXPORT uint32_t reflash_get_bg_color();
+REFLASH_EXPORT uint32_t reflash_get_frame_interval_ms();
 
 }
 
