@@ -1,0 +1,69 @@
+name: Deploy ReFlash to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# إعطاء الصلاحيات للـ Actions عشان ترفع على Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.56
+
+      - name: Verify Emscripten
+        run: emcc -v
+
+      - name: Configure CMake with Emscripten
+        run: |
+          emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build WebAssembly Target
+        run: |
+          cmake --build build-wasm
+
+      - name: Prepare Deployment Directory (dist)
+        run: |
+          mkdir -p dist
+          # نسخ ملفات الفرونت إند
+          cp web/index.html dist/
+          cp web/shell.js dist/
+          # نسخ ملفات الشيدرز لو موجودة
+          if [ -d "shaders" ]; then cp -r shaders dist/; fi
+          # نسخ الـ Wasm والـ JS المتولدة من الـ Build
+          find build-wasm -name "*.wasm" -exec cp {} dist/ \;
+          find build-wasm -name "*.js" -exec cp {} dist/ \;
+          echo "Files in dist:"
+          ls -la dist
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'dist'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
