@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ReFlash Engine - WebAssembly Flash Runtime Test Harness</title>
+    <title>ReFlash Engine - SWF Inspector & WebGL2 Runtime</title>
     <style>
         :root {
             --bg-color: #1a1a24;
@@ -11,6 +11,7 @@
             --accent-color: #00d2ff;
             --text-color: #f0f0f5;
             --border-color: #38384d;
+            --drag-active-bg: rgba(0, 210, 255, 0.1);
         }
 
         body {
@@ -22,6 +23,8 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
 
         h1 {
@@ -41,10 +44,20 @@
 
         .canvas-container {
             background-color: #0f0f16;
-            border: 2px solid var(--border-color);
+            border: 2px dashed var(--border-color);
             border-radius: 8px;
             padding: 10px;
             box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            position: relative;
+            transition: border-color 0.2s, background-color 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .canvas-container.drag-over {
+            border-color: var(--accent-color);
+            background-color: var(--drag-active-bg);
         }
 
         canvas {
@@ -58,7 +71,7 @@
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 20px;
-            width: 320px;
+            width: 340px;
             display: flex;
             flex-direction: column;
             gap: 16px;
@@ -77,7 +90,7 @@
             color: #b0b0cc;
         }
 
-        select, button {
+        select, button, input[type="file"] {
             background-color: #161622;
             color: var(--text-color);
             border: 1px solid var(--border-color);
@@ -88,7 +101,11 @@
             transition: border-color 0.2s, background-color 0.2s;
         }
 
-        select:hover, button:hover {
+        input[type="file"] {
+            padding: 8px;
+        }
+
+        select:hover, button:hover, input[type="file"]:hover {
             border-color: var(--accent-color);
         }
 
@@ -102,37 +119,77 @@
             background-color: #00aaff;
         }
 
-        .stats-box {
+        .hud-panel {
             background-color: #161622;
+            border: 1px solid var(--border-color);
             border-radius: 6px;
-            padding: 12px;
-            font-family: monospace;
-            font-size: 0.85rem;
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
         }
 
-        .stat-item {
+        .hud-title {
+            font-weight: bold;
+            color: var(--accent-color);
+            font-size: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+        }
+
+        .hud-item {
             display: flex;
             justify-content: space-between;
+            font-family: monospace;
+            font-size: 0.85rem;
         }
 
-        .stat-value {
-            color: var(--accent-color);
+        .hud-label {
+            color: #b0b0cc;
+        }
+
+        .hud-value {
+            color: #ffffff;
+            font-weight: bold;
+        }
+
+        .drop-hint {
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: #8888aa;
         }
     </style>
 </head>
-<body>
+<body id="drop-target">
 
-    <h1>⚡ ReFlash Runtime - WebGL2 Flash Blend Modes Test Harness</h1>
+    <h1>⚡ ReFlash Runtime - SWF Binary Inspector</h1>
 
     <div class="container">
-        <div class="canvas-container">
+        <div class="canvas-container" id="canvas-wrapper">
             <canvas id="reflash-canvas" width="800" height="600"></canvas>
+            <div class="drop-hint">Drag & Drop any .swf file anywhere or use the picker on the right</div>
         </div>
 
         <div class="panel">
+            <div class="control-group">
+                <label for="swf-file-picker">Load Local SWF File</label>
+                <input type="file" id="swf-file-picker" accept=".swf">
+            </div>
+
+            <div class="hud-panel" id="swf-hud">
+                <div class="hud-title">🔍 SWF Inspector HUD</div>
+                <div class="hud-item"><span class="hud-label">File:</span><span id="hud-file" class="hud-value">No SWF loaded</span></div>
+                <div class="hud-item"><span class="hud-label">Size:</span><span id="hud-size" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Signature:</span><span id="hud-signature" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">SWF Version:</span><span id="hud-version" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Engine:</span><span id="hud-engine" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Stage Size:</span><span id="hud-stage" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Frame Rate:</span><span id="hud-framerate" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Frame Count:</span><span id="hud-frames" class="hud-value">-</span></div>
+                <div class="hud-item"><span class="hud-label">Background:</span><span id="hud-bgcolor" class="hud-value">-</span></div>
+            </div>
+
             <div class="control-group">
                 <label for="blend-select">Flash Blend Mode</label>
                 <select id="blend-select">
@@ -144,24 +201,11 @@
                 </select>
             </div>
 
-            <div class="control-group">
-                <label for="pattern-btn">Test Pattern Generator</label>
-                <button id="pattern-btn">Cycle Test Patterns</button>
-            </div>
-
-            <div class="stats-box">
-                <div class="stat-item">
-                    <span>Engine Status:</span>
-                    <span id="stat-status" class="stat-value">Initializing...</span>
-                </div>
-                <div class="stat-item">
-                    <span>FPS:</span>
-                    <span id="stat-fps" class="stat-value">0</span>
-                </div>
-                <div class="stat-item">
-                    <span>Wasm Memory:</span>
-                    <span id="stat-memory" class="stat-value">0 MB</span>
-                </div>
+            <div class="hud-panel">
+                <div class="hud-title">📊 Runtime Performance</div>
+                <div class="hud-item"><span class="hud-label">Status:</span><span id="stat-status" class="hud-value">Initializing...</span></div>
+                <div class="hud-item"><span class="hud-label">FPS:</span><span id="stat-fps" class="hud-value">0</span></div>
+                <div class="hud-item"><span class="hud-label">Wasm Memory:</span><span id="stat-memory" class="hud-value">0 MB</span></div>
             </div>
         </div>
     </div>

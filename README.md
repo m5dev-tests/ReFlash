@@ -17,19 +17,24 @@ ReFlash/
 │   └── reflash/
 │       ├── core.hpp            # Engine main loop & lifecycle definitions
 │       ├── renderer.hpp        # WebGL2 rendering pipeline interface & C exports
-│       └── blend_modes.hpp     # Flash Blend Modes enum & ColorTransform structs
+│       ├── blend_modes.hpp     # Flash Blend Modes enum & ColorTransform structs
+│       ├── swf_stream.hpp      # Low-level SWF bitstream reader (RECT, twips, fixed-point)
+│       └── swf_parser.hpp      # SWF header parser, zlib decompression & tag pipeline
 ├── src/
 │   ├── main.cpp                # Native/Wasm entrypoint
 │   ├── renderer.cpp            # WebGL2 / GLES3 state management & C exports
-│   └── blend_modes.cpp         # Software fallback CPU blend arithmetic
+│   ├── blend_modes.cpp         # Software fallback CPU blend arithmetic
+│   ├── swf_stream.cpp          # SWFStream bitstream reader implementation
+│   └── swf_parser.cpp          # SWFDocument header & tag parsing implementation
 ├── shaders/
 │   ├── vertex.glsl             # GLSL 300 es vertex shader
 │   └── blend_frag.glsl        # GLSL 300 es fragment shader for Flash blend modes
 ├── web/
-│   ├── index.html              # Interactive HTML5 test harness UI
-│   └── shell.js                # JavaScript Wasm bridge & runtime metrics
+│   ├── index.html              # Interactive HTML5 test harness UI & SWF Inspector HUD
+│   └── shell.js                # JavaScript Wasm bridge, drag-and-drop & runtime metrics
 └── tests/
-    └── test_blend_modes.cpp    # CPU unit test suite for blend equations
+    ├── test_blend_modes.cpp    # CPU unit test suite for blend equations
+    └── test_swf_parser.cpp     # Unit test suite for SWF bitstream, zlib CWS, & tags
 ```
 
 ---
@@ -39,6 +44,7 @@ ReFlash/
 ### Prerequisites
 - [Emscripten SDK (emsdk)](https://emscripten.org/) installed and activated in your environment.
 - CMake (v3.15+) and C++20 compliant compiler.
+- zlib library (system `zlib` for native build, `-s USE_ZLIB=1` for Emscripten Wasm).
 
 ### 1. WebAssembly (Wasm) Build
 To compile ReFlash to WebAssembly and WebGL2 using Emscripten:
@@ -57,7 +63,7 @@ This generates `reflash.js` and `reflash.wasm`. Copy or serve `web/index.html` a
 python3 -m http.server 8080 --directory .
 ```
 
-Navigate to `http://localhost:8080/web/index.html` to launch the web test harness.
+Navigate to `http://localhost:8080/web/index.html` to launch the web test harness and SWF Inspector.
 
 ### 2. Native Build & Unit Testing
 To build and run native CPU unit tests:
@@ -89,6 +95,11 @@ ReFlash supports full Flash-compatible 2D blend mode equations in WebGL2 shaders
 - [x] Initial project scaffolding & WebGL2 shader pipeline for blend modes.
 - [x] WebAssembly exported C interfaces and HTML5 shell harness.
 - [x] CPU software verification unit test suite.
+- [x] **SWF Tag Parser, Zlib Decompression & Web Drag-and-Drop Ingestion**:
+  - Spec-compliant binary bitstream reader (`SWFStream`: RECT, Twips conversion, Fixed8/FB fixed-point).
+  - Decompress zlib payload (`CWS`) using `inflate` starting at byte 8.
+  - SWF Header and tag parsing loop (`SetBackgroundColor`, `FileAttributes`, `DoAction`, `DoABC`, `PlaceObject2/3`).
+  - Web drag-and-drop / file picker harness with live SWF Inspector HUD.
 - [ ] **AVM2 / Tamarin Integration**:
   - Integrate Adobe ActionScript Virtual Machine 2 (AVM2 / Tamarin core) from [https://github.com/adobe/avmplus](https://github.com/adobe/avmplus).
   - Implement SWF tag parser (`DoABC`, `DefineSprite`, `DefineBitsJPEG2`).
