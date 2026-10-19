@@ -19,13 +19,17 @@ ReFlash/
 │       ├── renderer.hpp        # WebGL2 rendering pipeline interface & C exports
 │       ├── blend_modes.hpp     # Flash Blend Modes enum & ColorTransform structs
 │       ├── swf_stream.hpp      # Low-level SWF bitstream reader (RECT, twips, fixed-point)
-│       └── swf_parser.hpp      # SWF header parser, zlib decompression & tag pipeline
+│       ├── swf_parser.hpp      # SWF header parser, zlib decompression & tag pipeline
+│       ├── avm2_context.hpp    # ActionScript Virtual Machine 2 (AVM2) execution context
+│       └── display_tree.hpp    # ActionScript DisplayObject, MovieClip & matrix tree
 ├── src/
 │   ├── main.cpp                # Native/Wasm entrypoint
 │   ├── renderer.cpp            # WebGL2 / GLES3 state management & C exports
 │   ├── blend_modes.cpp         # Software fallback CPU blend arithmetic
 │   ├── swf_stream.cpp          # SWFStream bitstream reader implementation
-│   └── swf_parser.cpp          # SWFDocument header & tag parsing implementation
+│   ├── swf_parser.cpp          # SWFDocument header & tag parsing implementation
+│   ├── avm2_context.cpp        # AVM2 wrapper & ABC bytecode ingestion implementation
+│   └── display_tree.cpp        # DisplayObject tree & matrix concatenation implementation
 ├── shaders/
 │   ├── vertex.glsl             # GLSL 300 es vertex shader
 │   └── blend_frag.glsl        # GLSL 300 es fragment shader for Flash blend modes
@@ -34,7 +38,9 @@ ReFlash/
 │   └── shell.js                # JavaScript Wasm bridge, drag-and-drop & runtime metrics
 └── tests/
     ├── test_blend_modes.cpp    # CPU unit test suite for blend equations
-    └── test_swf_parser.cpp     # Unit test suite for SWF bitstream, zlib CWS, & tags
+    ├── test_swf_parser.cpp     # Unit test suite for SWF bitstream, zlib CWS, & tags
+    ├── test_avm2_abc.cpp       # Unit test suite for AVM2 ABC bytecode & version spoofing
+    └── test_display_tree.cpp   # Unit test suite for DisplayObject matrix concatenation
 ```
 
 ---
@@ -100,10 +106,10 @@ ReFlash supports full Flash-compatible 2D blend mode equations in WebGL2 shaders
   - Decompress zlib payload (`CWS`) using `inflate` starting at byte 8.
   - SWF Header and tag parsing loop (`SetBackgroundColor`, `FileAttributes`, `DoAction`, `DoABC`, `PlaceObject2/3`).
   - Web drag-and-drop / file picker harness with live SWF Inspector HUD.
-- [ ] **AVM2 / Tamarin Integration**:
-  - Integrate Adobe ActionScript Virtual Machine 2 (AVM2 / Tamarin core) from [https://github.com/adobe/avmplus](https://github.com/adobe/avmplus).
-  - Implement SWF tag parser (`DoABC`, `DefineSprite`, `DefineBitsJPEG2`).
-  - Wire ActionScript DisplayObject tree into ReFlash WebGL2 render pipeline.
+- [x] **AVM2 / Tamarin Integration & DisplayObject Tree Pipeline**:
+  - Integrated AVM2 interpreter core wrapper (`include/reflash/avm2_context.hpp`).
+  - Implemented SWF tag parsing (`DoABC` with AS3 gating, `DefineSprite`, `DefineBitsJPEG2/3`, `SymbolClass`).
+  - Wired ActionScript DisplayObject tree into ReFlash WebGL2 render pipeline (`include/reflash/display_tree.hpp`).
 - [ ] ActionScript 3.0 event handling & user input forwarding (mouse, keyboard).
 
 ---

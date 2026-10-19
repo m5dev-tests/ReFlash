@@ -116,6 +116,17 @@ SWFRect SWFStream::read_rect() {
     return rect;
 }
 
+std::string SWFStream::read_string() {
+    align();
+    std::string str;
+    while (byte_offset_ < size_) {
+        uint8_t ch = data_[byte_offset_++];
+        if (ch == 0) break;
+        str.push_back(static_cast<char>(ch));
+    }
+    return str;
+}
+
 void SWFStream::seek(size_t byte_offset) {
     if (byte_offset > size_) {
         throw std::out_of_range("SWFStream seek out of bounds");

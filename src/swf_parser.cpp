@@ -1,5 +1,6 @@
 #include "reflash/swf_parser.hpp"
 #include "reflash/swf_stream.hpp"
+#include "reflash/avm2_context.hpp"
 #include <zlib.h>
 #include <cstring>
 #include <iostream>
@@ -8,12 +9,20 @@ namespace reflash {
 
 static SWFDocument g_current_document;
 
+uint32_t SWFDocument::frame_interval_ms() const {
+    // Pixel-Perfect Frame Timing Formula using Adobe internal fixed-point representation
+    if (header_.frame_rate_fixed8 > 0) {
+        return 256000 / header_.frame_rate_fixed8;
+    }
+    return 1000 / 24;
+}
+
 bool SWFDocument::decompress_zlib(const uint8_t* src, size_t src_len, uint32_t expected_uncompressed_payload_len) {
     decompressed_buffer_.clear();
     // Re-construct the full decompressed file payload: 8 bytes uncompressed header + decompressed payload
     decompressed_buffer_.resize(8 + expected_uncompressed_payload_len);
 
-    // Copy original 8-byte header into decompressed buffer and replace CWS signature with FWS
+    // Copy original 8-byte header into decompressed buffer and overwrite byte 0: 'C' -> 'F'
     std::memcpy(decompressed_buffer_.data(), src, 8);
     decompressed_buffer_[0] = 'F';
 
@@ -43,6 +52,10 @@ bool SWFDocument::parse(const uint8_t* buffer, size_t size) {
 
     tags_.clear();
     tag_counts_.clear();
+    jpeg_assets_.clear();
+    sprites_.clear();
+    symbol_classes_.clear();
+    timeline_frames_.clear();
     bg_color_ = 0xFFFFFF;
     is_as3_ = false;
 
@@ -89,6 +102,13 @@ bool SWFDocument::parse(const uint8_t* buffer, size_t size) {
     stream.seek(8);
 
     header_.frame_size = stream.read_rect();
+
+    // Store 8.8 fixed-point frame rate value before conversion to float
+    size_t fr_offset = stream.tell();
+    uint8_t fr_b0 = parse_buffer[fr_offset];
+    uint8_t fr_b1 = parse_buffer[fr_offset + 1];
+    header_.frame_rate_fixed8 = static_cast<uint16_t>(fr_b0 | (fr_b1 << 8));
+
     header_.frame_rate = stream.read_fixed8();
     header_.frame_count = stream.read_u16_le();
 
@@ -97,6 +117,9 @@ bool SWFDocument::parse(const uint8_t* buffer, size_t size) {
 }
 
 void SWFDocument::parse_tags(SWFStream& stream) {
+    TimelineFrame current_frame;
+    current_frame.frame_index = 0;
+
     while (stream.bytes_remaining() >= 2) {
         size_t tag_header_offset = stream.tell();
         uint16_t tag_code_and_length = stream.read_u16_le();
@@ -120,27 +143,138 @@ void SWFDocument::parse_tags(SWFStream& stream) {
         tags_.push_back(tag);
         tag_counts_[tag_code]++;
 
-        // Parse specific tags of interest
-        if (tag_code == 0) { // End Tag
+        // Tag Handling according to Open-Flash spec & Engine Quirks
+        if (tag_code == 0) { // Tag 0: End
             break;
-        } else if (tag_code == 9) { // SetBackgroundColor
+        } else if (tag_code == 1) { // Tag 1: ShowFrame -> Flush deferred timeline commands for frame
+            timeline_frames_.push_back(current_frame);
+            current_frame.frame_index++;
+            current_frame.commands.clear();
+        } else if (tag_code == 9) { // Tag 9: SetBackgroundColor
             if (tag_length >= 3) {
                 uint8_t r = stream.read_u8();
                 uint8_t g = stream.read_u8();
                 uint8_t b = stream.read_u8();
                 bg_color_ = (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
             }
-        } else if (tag_code == 69) { // FileAttributes
+        } else if (tag_code == 69) { // Tag 69: FileAttributes
             if (tag_length >= 1) {
                 uint8_t flags = stream.read_u8();
                 is_as3_ = (flags & 0x08) != 0; // Bit 3: ActionScript 3.0 flag
             }
-        } else if (tag_code == 72) { // DoABC
-            is_as3_ = true;
+        } else if (tag_code == 72 || tag_code == 82) { // Tag 72/82: DoABC
+            // QUIRK 3: AS3 Gating for DoABC - skip execution if AS3 flag is false
+            if (is_as3_) {
+                uint32_t flags = stream.read_u32_le();
+                std::string abc_name = stream.read_string();
+                size_t header_bytes_read = sizeof(uint32_t) + abc_name.length() + 1;
+
+                if (tag_length > header_bytes_read) {
+                    size_t abc_bytecode_len = tag_length - header_bytes_read;
+                    std::vector<uint8_t> abc_bytecode(abc_bytecode_len);
+                    for (size_t i = 0; i < abc_bytecode_len; ++i) {
+                        abc_bytecode[i] = stream.read_u8();
+                    }
+                    reflash_execute_abc(abc_bytecode.data(), abc_bytecode.size(), abc_name.c_str());
+                }
+            }
+        } else if (tag_code == 21) { // Tag 21: DefineBitsJPEG2
+            if (tag_length >= 2) {
+                uint16_t char_id = stream.read_u16_le();
+                JPEGAsset asset;
+                asset.character_id = char_id;
+                if (tag_length > 2) {
+                    size_t img_len = tag_length - 2;
+                    asset.image_data.resize(img_len);
+                    for (size_t i = 0; i < img_len; ++i) {
+                        asset.image_data[i] = stream.read_u8();
+                    }
+                }
+                jpeg_assets_[char_id] = asset;
+            }
+        } else if (tag_code == 35) { // Tag 35: DefineBitsJPEG3
+            if (tag_length >= 6) {
+                uint16_t char_id = stream.read_u16_le();
+                uint32_t alpha_data_offset = stream.read_u32_le();
+                JPEGAsset asset;
+                asset.character_id = char_id;
+
+                if (alpha_data_offset > 0 && alpha_data_offset < tag_length - 6) {
+                    asset.image_data.resize(alpha_data_offset);
+                    for (size_t i = 0; i < alpha_data_offset; ++i) {
+                        asset.image_data[i] = stream.read_u8();
+                    }
+                    size_t alpha_len = (tag_length - 6) - alpha_data_offset;
+                    asset.alpha_data.resize(alpha_len);
+                    for (size_t i = 0; i < alpha_len; ++i) {
+                        asset.alpha_data[i] = stream.read_u8();
+                    }
+                }
+                jpeg_assets_[char_id] = asset;
+            }
+        } else if (tag_code == 39) { // Tag 39: DefineSprite
+            if (tag_length >= 4) {
+                uint16_t sprite_id = stream.read_u16_le();
+                uint16_t frame_count = stream.read_u16_le();
+                DefineSpriteData sprite;
+                sprite.sprite_id = sprite_id;
+                sprite.frame_count = frame_count;
+                sprites_[sprite_id] = sprite;
+            }
+        } else if (tag_code == 76) { // Tag 76: SymbolClass
+            if (tag_length >= 2) {
+                uint16_t num_symbols = stream.read_u16_le();
+                for (uint16_t i = 0; i < num_symbols; ++i) {
+                    if (stream.tell() >= tag_next_offset) break;
+                    uint16_t char_id = stream.read_u16_le();
+                    std::string class_name = stream.read_string();
+                    symbol_classes_[char_id] = class_name;
+                }
+            }
+        } else if (tag_code == 26 || tag_code == 70) { // PlaceObject2 / PlaceObject3
+            FrameCommand cmd;
+            cmd.type = FrameCommandType::PlaceObject;
+            if (tag_length >= 3) {
+                uint8_t flags1 = stream.read_u8();
+                uint16_t depth = stream.read_u16_le();
+                cmd.depth = depth;
+                cmd.place_data.depth = depth;
+
+                bool has_character = (flags1 & 0x02) != 0;
+                if (has_character) {
+                    uint16_t char_id = stream.read_u16_le();
+                    cmd.character_id = char_id;
+                    cmd.place_data.character_id = char_id;
+                    cmd.place_data.has_character = true;
+                }
+            }
+            current_frame.commands.push_back(cmd);
+        } else if (tag_code == 28) { // RemoveObject2
+            if (tag_length >= 2) {
+                uint16_t depth = stream.read_u16_le();
+                FrameCommand cmd;
+                cmd.type = FrameCommandType::RemoveObject;
+                cmd.depth = depth;
+                current_frame.commands.push_back(cmd);
+            }
+        } else if (tag_code == 12) { // DoAction
+            FrameCommand cmd;
+            cmd.type = FrameCommandType::DoAction;
+            if (tag_length > 0) {
+                cmd.action_bytecode.resize(tag_length);
+                for (size_t i = 0; i < tag_length; ++i) {
+                    cmd.action_bytecode[i] = stream.read_u8();
+                }
+            }
+            current_frame.commands.push_back(cmd);
         }
 
-        // Always position stream at next tag start to guarantee stream alignment
+        // Guarantee stream alignment for next tag
         stream.seek(tag_next_offset);
+    }
+
+    if (!current_frame.commands.empty()) {
+        timeline_frames_.push_back(current_frame);
     }
 }
 
@@ -178,6 +312,10 @@ REFLASH_EXPORT int reflash_get_as_version() {
 
 REFLASH_EXPORT uint32_t reflash_get_bg_color() {
     return reflash::g_current_document.bg_color();
+}
+
+REFLASH_EXPORT uint32_t reflash_get_frame_interval_ms() {
+    return reflash::g_current_document.frame_interval_ms();
 }
 
 }
