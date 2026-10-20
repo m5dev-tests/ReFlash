@@ -147,6 +147,8 @@ private:
     void parse_tags(SWFStream& stream);
 };
 
+bool load_movie_from_vfs(const std::string& url, std::vector<uint8_t>& out_buffer);
+
 } // namespace reflash
 
 #ifdef __EMSCRIPTEN__
@@ -160,6 +162,7 @@ private:
 extern "C" {
 
 REFLASH_EXPORT int reflash_load_swf(const uint8_t* buffer, size_t length);
+REFLASH_EXPORT int reflash_load_movie(const char* url);
 REFLASH_EXPORT float reflash_get_width();
 REFLASH_EXPORT float reflash_get_height();
 REFLASH_EXPORT float reflash_get_framerate();

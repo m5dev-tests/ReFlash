@@ -102,6 +102,36 @@ void test_movieclip_playback() {
     std::cout << "  -> test_movieclip_playback PASSED" << std::endl;
 }
 
+void test_loadmovie_lifecycle() {
+    std::cout << "[Test] test_loadmovie_lifecycle..." << std::endl;
+
+    reflash::MovieClip loader_mc;
+    loader_mc.set_total_frames(5);
+    loader_mc.set_is_loader_clip(true);
+    loader_mc.set_initialized(false);
+    loader_mc.set_bytes_loaded(0);
+    loader_mc.set_bytes_total(1024);
+
+    // Initial state: bytes_loaded = 0, bytes_total = 1024, not initialized
+    assert(loader_mc.bytes_loaded() == 0);
+    assert(loader_mc.bytes_total() == 1024);
+    assert(!loader_mc.can_dispatch_enter_frame());
+
+    uint32_t frame_before = loader_mc.current_frame();
+    loader_mc.advance_frame();
+    assert(loader_mc.current_frame() == frame_before); // Should not advance when uninitialized
+
+    // After loading completes
+    loader_mc.set_bytes_loaded(1024);
+    loader_mc.set_initialized(true);
+    assert(loader_mc.can_dispatch_enter_frame());
+
+    loader_mc.advance_frame();
+    assert(loader_mc.current_frame() == frame_before + 1); // Advances to frame 2
+
+    std::cout << "  -> test_loadmovie_lifecycle PASSED" << std::endl;
+}
+
 int main() {
     std::cout << "==========================================" << std::endl;
     std::cout << "Running Display Tree Unit Tests" << std::endl;
@@ -110,6 +140,7 @@ int main() {
     test_matrix_concatenation();
     test_depth_sorting();
     test_movieclip_playback();
+    test_loadmovie_lifecycle();
 
     std::cout << "==========================================" << std::endl;
     std::cout << "All Display Tree Unit Tests PASSED!" << std::endl;

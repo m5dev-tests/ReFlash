@@ -11,6 +11,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(REFLASH_SOURCES
     src/blend_modes.cpp
     src/renderer.cpp
+    src/filter_engine.cpp
     src/swf_stream.cpp
     src/swf_parser.cpp
     src/avm2_context.cpp
@@ -32,8 +33,8 @@ if(EMSCRIPTEN)
         "-sFULL_ES3=1"
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
-        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
-        "-sEXPORTED_FUNCTIONS=['_init_engine','_load_frame','_set_blend_mode','_set_color_transform','_reflash_load_swf','_reflash_get_width','_reflash_get_height','_reflash_get_framerate','_reflash_get_frame_count','_reflash_get_version','_reflash_get_as_version','_reflash_get_bg_color','_reflash_get_frame_interval_ms','_reflash_execute_abc','_malloc','_free','_main']"
+        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']"
+        "-sEXPORTED_FUNCTIONS=['_init_engine','_load_frame','_set_blend_mode','_set_color_transform','_reflash_load_swf','_reflash_load_movie','_reflash_get_width','_reflash_get_height','_reflash_get_framerate','_reflash_get_frame_count','_reflash_get_version','_reflash_get_as_version','_reflash_get_bg_color','_reflash_get_frame_interval_ms','_reflash_execute_abc','_malloc','_free','_main']"
     )
 else()
     find_package(ZLIB REQUIRED)
@@ -46,6 +47,11 @@ else()
     add_executable(test_blend_modes
         src/blend_modes.cpp
         tests/test_blend_modes.cpp
+    )
+
+    add_executable(test_filters
+        src/filter_engine.cpp
+        tests/test_filters.cpp
     )
 
     add_executable(test_swf_parser
@@ -67,12 +73,18 @@ else()
     add_executable(test_display_tree
         src/blend_modes.cpp
         src/renderer.cpp
+        src/filter_engine.cpp
+        src/swf_stream.cpp
+        src/swf_parser.cpp
+        src/avm2_context.cpp
         src/display_tree.cpp
         tests/test_display_tree.cpp
     )
+    target_link_libraries(test_display_tree PRIVATE ZLIB::ZLIB)
 
     enable_testing()
     add_test(NAME test_blend_modes COMMAND test_blend_modes)
+    add_test(NAME test_filters COMMAND test_filters)
     add_test(NAME test_swf_parser COMMAND test_swf_parser)
     add_test(NAME test_avm2_abc COMMAND test_avm2_abc)
     add_test(NAME test_display_tree COMMAND test_display_tree)

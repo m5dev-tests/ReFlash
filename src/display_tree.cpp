@@ -1,5 +1,7 @@
 #include "reflash/display_tree.hpp"
 #include "reflash/renderer.hpp"
+#include "reflash/filter_engine.hpp"
+#include "reflash/swf_parser.hpp"
 #include <algorithm>
 
 namespace reflash {
@@ -24,6 +26,17 @@ void DisplayObject::render() {
     Renderer renderer;
     renderer.set_blend_mode(blend_mode_);
     renderer.set_color_transform(color_transform_);
+
+    if (!filters_.empty()) {
+        auto& engine = get_global_filter_engine();
+        if (engine.is_initialized()) {
+            engine.begin_object_pass();
+            for (const auto& filter : filters_) {
+                engine.apply_filter(filter);
+            }
+            engine.end_object_pass();
+        }
+    }
 }
 
 void DisplayObjectContainer::add_child(std::shared_ptr<DisplayObject> child) {
@@ -103,8 +116,40 @@ void MovieClip::goto_and_play(uint32_t frame) {
     is_playing_ = true;
 }
 
+bool MovieClip::load_movie(const std::string& url) {
+    std::vector<uint8_t> buffer;
+    if (!load_movie_from_vfs(url, buffer)) {
+        return false;
+    }
+
+    size_t file_size = buffer.size();
+    // 1. Strict Load Lifecycle: Set initial bytesLoaded = 0 and bytesTotal = fileSize (do NOT return 0/0)
+    bytes_loaded_ = 0;
+    bytes_total_ = file_size;
+    is_initialized_ = false;
+    loading_in_progress_ = true;
+
+    // Parse child movie document
+    std::shared_ptr<SWFDocument> child_doc = std::make_shared<SWFDocument>();
+    if (!child_doc->parse(buffer.data(), buffer.size())) {
+        loading_in_progress_ = false;
+        return false;
+    }
+
+    set_total_frames(child_doc->header().frame_count);
+
+    // 2. Initialization Sequence: Only start ticking onEnterFrame when bytesLoaded == bytesTotal
+    bytes_loaded_ = file_size;
+    is_initialized_ = true;
+    loading_in_progress_ = false;
+
+    // Timeline and Frame 1 tags are properly registered so _root.mc_stg.play() advances timeline to Frame 2
+    return true;
+}
+
 void MovieClip::advance_frame() {
     if (!is_playing_) return;
+    if (!can_dispatch_enter_frame()) return;
     current_frame_++;
     if (current_frame_ > total_frames_) {
         current_frame_ = 1;
