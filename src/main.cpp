@@ -1,7 +1,14 @@
 #include "reflash/core.hpp"
 #include <iostream>
 
-int main(int argc, char** argv) {
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#define REFLASH_EXPORT EMSCRIPTEN_KEEPALIVE
+#else
+#define REFLASH_EXPORT
+#endif
+
+extern "C" REFLASH_EXPORT int main(int argc, char** argv) {
     std::cout << "Initializing ReFlash - Open-Source WebAssembly Flash Runtime Engine" << std::endl;
     reflash::Engine engine;
     if (!engine.init(800, 600)) {
