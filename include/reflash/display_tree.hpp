@@ -2,6 +2,7 @@
 #define REFLASH_DISPLAY_TREE_HPP
 
 #include "reflash/blend_modes.hpp"
+#include "reflash/filter_engine.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -59,6 +60,11 @@ public:
     BlendMode blend_mode() const { return blend_mode_; }
     void set_blend_mode(BlendMode mode) { blend_mode_ = mode; }
 
+    const std::vector<Filter>& filters() const { return filters_; }
+    void set_filters(const std::vector<Filter>& filters) { filters_ = filters; }
+    void add_filter(const Filter& filter) { filters_.push_back(filter); }
+    void clear_filters() { filters_.clear(); }
+
     DisplayObjectContainer* parent() const { return parent_; }
     void set_parent(DisplayObjectContainer* parent) { parent_ = parent; }
 
@@ -75,6 +81,7 @@ protected:
     Matrix world_matrix_;
     ColorTransform color_transform_;
     BlendMode blend_mode_{BlendMode::Normal};
+    std::vector<Filter> filters_;
 
     DisplayObjectContainer* parent_{nullptr};
 };
@@ -115,12 +122,38 @@ public:
     void goto_and_stop(uint32_t frame);
     void goto_and_play(uint32_t frame);
 
+    size_t bytes_loaded() const { return bytes_loaded_; }
+    size_t bytes_total() const { return bytes_total_; }
+    void set_bytes_loaded(size_t loaded) { bytes_loaded_ = loaded; }
+    void set_bytes_total(size_t total) { bytes_total_ = total; }
+
+    bool is_initialized() const { return is_initialized_; }
+    void set_initialized(bool init) { is_initialized_ = init; }
+
+    bool is_loader_clip() const { return is_loader_clip_; }
+    void set_is_loader_clip(bool loader) { is_loader_clip_ = loader; }
+
+    bool can_dispatch_enter_frame() const {
+        if (loading_in_progress_) return false;
+        if (is_loader_clip_ && (!is_initialized_ || bytes_loaded_ < bytes_total_)) {
+            return false;
+        }
+        return true;
+    }
+
+    bool load_movie(const std::string& url);
     void advance_frame();
 
 private:
     uint32_t current_frame_{1};
     uint32_t total_frames_{1};
     bool is_playing_{true};
+
+    size_t bytes_loaded_{100};
+    size_t bytes_total_{100};
+    bool is_initialized_{true};
+    bool is_loader_clip_{false};
+    bool loading_in_progress_{false};
 };
 
 class Stage : public DisplayObjectContainer {

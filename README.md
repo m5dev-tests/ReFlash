@@ -1,6 +1,6 @@
 # ReFlash ⚡
 
-**ReFlash** is a lightweight, high-performance, open-source Flash Player runtime targeting **WebAssembly (Wasm)** and **WebGL2**. It provides an open-source, GPL-licensed alternative to closed-source solutions, focusing on pixel-accurate 2D rendering, ActionScript display object blend modes (`Normal`, `Add`, `Multiply`, `Screen`, `Invert`/`Difference`), and `ColorTransform` matrix arithmetic.
+**ReFlash** is a lightweight, high-performance, open-source Flash Player runtime targeting **WebAssembly (Wasm)** and **WebGL2**. It provides an open-source, GPL-licensed alternative to closed-source solutions, focusing on pixel-accurate 2D rendering, ActionScript display object blend modes (`Normal`, `Add`, `Multiply`, `Screen`, `Invert`/`Difference`), `ColorTransform` matrix arithmetic, a production-grade 2D Flash filter pipeline (`Blur`, `Glow`, `DropShadow`, `Bevel`), and multi-SWF ZIP ingestion.
 
 ---
 
@@ -17,27 +17,36 @@ ReFlash/
 │   └── reflash/
 │       ├── core.hpp            # Engine main loop & lifecycle definitions
 │       ├── renderer.hpp        # WebGL2 rendering pipeline interface & C exports
+│       ├── filter_engine.hpp   # WebGL2 Filter Engine interface & FBO ping-pong pipeline
 │       ├── blend_modes.hpp     # Flash Blend Modes enum & ColorTransform structs
 │       ├── swf_stream.hpp      # Low-level SWF bitstream reader (RECT, twips, fixed-point)
 │       ├── swf_parser.hpp      # SWF header parser, zlib decompression & tag pipeline
 │       ├── avm2_context.hpp    # ActionScript Virtual Machine 2 (AVM2) execution context
+│       ├── events.hpp          # ActionScript event handling & user input forwarding
 │       └── display_tree.hpp    # ActionScript DisplayObject, MovieClip & matrix tree
 ├── src/
 │   ├── main.cpp                # Native/Wasm entrypoint
 │   ├── renderer.cpp            # WebGL2 / GLES3 state management & C exports
+│   ├── filter_engine.cpp       # Ping-pong FBO filter execution pipeline implementation
 │   ├── blend_modes.cpp         # Software fallback CPU blend arithmetic
 │   ├── swf_stream.cpp          # SWFStream bitstream reader implementation
-│   ├── swf_parser.cpp          # SWFDocument header & tag parsing implementation
+│   ├── swf_parser.cpp          # SWFDocument header, tag parsing & loadMovie resolution
 │   ├── avm2_context.cpp        # AVM2 wrapper & ABC bytecode ingestion implementation
-│   └── display_tree.cpp        # DisplayObject tree & matrix concatenation implementation
+│   ├── events.cpp              # Input forwarding & event dispatcher implementation
+│   └── display_tree.cpp        # DisplayObject tree & loadMovie lifecycle implementation
 ├── shaders/
 │   ├── vertex.glsl             # GLSL 300 es vertex shader
-│   └── blend_frag.glsl        # GLSL 300 es fragment shader for Flash blend modes
+│   ├── blend_frag.glsl        # GLSL 300 es fragment shader for Flash blend modes
+│   ├── filter_blur.vert        # Separable box blur vertex shader
+│   ├── filter_blur.frag        # Separable box blur fragment shader
+│   ├── filter_composite.vert   # Unified filter compositor vertex shader
+│   └── filter_composite.frag   # Unified Glow/DropShadow/Bevel filter compositor
 ├── web/
 │   ├── index.html              # Interactive HTML5 test harness UI & SWF Inspector HUD
-│   └── shell.js                # JavaScript Wasm bridge, drag-and-drop & runtime metrics
+│   └── shell.js                # JS Wasm bridge, drag-and-drop & ZIP archive extraction
 └── tests/
     ├── test_blend_modes.cpp    # CPU unit test suite for blend equations
+    ├── test_filters.cpp        # Unit test suite for filter flag unpacking & shadow offset math
     ├── test_swf_parser.cpp     # Unit test suite for SWF bitstream, zlib CWS, & tags
     ├── test_avm2_abc.cpp       # Unit test suite for AVM2 ABC bytecode & version spoofing
     └── test_display_tree.cpp   # Unit test suite for DisplayObject matrix concatenation
@@ -84,6 +93,16 @@ ctest --output-on-failure
 
 ---
 
+## 🎨 Flash 2D Filter Engine Architecture
+
+ReFlash features a self-contained WebGL2 filter engine utilizing multi-pass Framebuffer Objects (FBO ping-pong rendering):
+- **Two-Pass Box Blur (`filter_blur.frag`)**: Separable horizontal and vertical box filter with fractional edge weights across `passes` iterations.
+- **Unified Composite Shader (`filter_composite.frag`)**: Handles Glow, DropShadow, and Bevel compositing with configurable inner/outer flags, knockout, hideObject, and strength multipliers.
+- **Multi-File ZIP Ingestion**: Supports `.zip` archives containing multiple SWF files. Automatically unpacks archives into Emscripten's virtual filesystem (`FS.writeFile`) and resolves `loadMovie` paths locally.
+- **LoadMovie Event Lifecycle (Issue #3615 Fix)**: Enforces strict load lifecycle (`bytesLoaded` / `bytesTotal`) and gates `onEnterFrame` on loader clips until movie clips are fully initialized.
+
+---
+
 ## 🧪 Flash Blend Modes & ColorTransform
 
 ReFlash supports full Flash-compatible 2D blend mode equations in WebGL2 shaders (`shaders/blend_frag.glsl`):
@@ -93,24 +112,6 @@ ReFlash supports full Flash-compatible 2D blend mode equations in WebGL2 shaders
 - **Screen**: $\text{Result.rgb} = 1.0 - (1.0 - \text{Src.rgb}) \times (1.0 - \text{Dst.rgb})$
 - **Invert / Difference**: $\text{Result.rgb} = |\text{Dst.rgb} - \text{Src.rgb}|$
 - **ColorTransform**: Applies color multipliers ($R_{\text{mult}}, G_{\text{mult}}, B_{\text{mult}}, A_{\text{mult}}$) and offsets ($R_{\text{add}}, G_{\text{add}}, B_{\text{add}}, A_{\text{add}}$).
-
----
-
-## 🗺️ Roadmap & AVM2 Integration
-
-- [x] Initial project scaffolding & WebGL2 shader pipeline for blend modes.
-- [x] WebAssembly exported C interfaces and HTML5 shell harness.
-- [x] CPU software verification unit test suite.
-- [x] **SWF Tag Parser, Zlib Decompression & Web Drag-and-Drop Ingestion**:
-  - Spec-compliant binary bitstream reader (`SWFStream`: RECT, Twips conversion, Fixed8/FB fixed-point).
-  - Decompress zlib payload (`CWS`) using `inflate` starting at byte 8.
-  - SWF Header and tag parsing loop (`SetBackgroundColor`, `FileAttributes`, `DoAction`, `DoABC`, `PlaceObject2/3`).
-  - Web drag-and-drop / file picker harness with live SWF Inspector HUD.
-- [x] **AVM2 / Tamarin Integration & DisplayObject Tree Pipeline**:
-  - Integrated AVM2 interpreter core wrapper (`include/reflash/avm2_context.hpp`).
-  - Implemented SWF tag parsing (`DoABC` with AS3 gating, `DefineSprite`, `DefineBitsJPEG2/3`, `SymbolClass`).
-  - Wired ActionScript DisplayObject tree into ReFlash WebGL2 render pipeline (`include/reflash/display_tree.hpp`).
-- [ ] ActionScript 3.0 event handling & user input forwarding (mouse, keyboard).
 
 ---
 

@@ -62,7 +62,7 @@ function setupUI() {
     const filePicker = document.getElementById('swf-file-picker');
     filePicker.addEventListener('change', (e) => {
         if (e.target.files && e.target.files.length > 0) {
-            processSwfFile(e.target.files[0]);
+            processInputFile(e.target.files[0]);
         }
     });
 }
@@ -94,21 +94,99 @@ function setupDragAndDrop() {
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files && files.length > 0) {
-            processSwfFile(files[0]);
+            processInputFile(files[0]);
         }
     }, false);
 }
 
-function processSwfFile(file) {
-    if (!file.name.toLowerCase().endsWith('.swf')) {
-        alert("Please select or drop a valid .swf file!");
+function processInputFile(file) {
+    const nameLower = file.name.toLowerCase();
+    if (nameLower.endsWith('.zip')) {
+        processZipArchive(file);
+    } else if (nameLower.endsWith('.swf')) {
+        processSwfFile(file);
+    } else {
+        alert("Please select or drop a valid .swf file or .zip archive!");
+    }
+}
+
+function processZipArchive(file) {
+    if (typeof JSZip === 'undefined') {
+        alert("JSZip library is not loaded.");
         return;
     }
 
     const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const zip = await JSZip.loadAsync(e.target.result);
+            let mainSwfData = null;
+            let mainSwfName = "";
+
+            for (const filename of Object.keys(zip.files)) {
+                const zipEntry = zip.files[filename];
+                if (zipEntry.dir) continue;
+
+                const fileData = await zipEntry.async("uint8array");
+                // Unpack into Emscripten virtual filesystem root
+                if (Module.FS && Module.FS.writeFile) {
+                    const cleanPath = filename.startsWith('/') ? filename : '/' + filename;
+                    const parts = cleanPath.split('/');
+                    if (parts.length > 2) {
+                        let curDir = "";
+                        for (let i = 1; i < parts.length - 1; i++) {
+                            curDir += "/" + parts[i];
+                            try { Module.FS.mkdir(curDir); } catch(err) {}
+                        }
+                    }
+                    Module.FS.writeFile(cleanPath, fileData);
+                }
+
+                const baseName = filename.split('/').pop().toLowerCase();
+                if (baseName.endsWith('.swf')) {
+                    if (!mainSwfData || baseName === 'main.swf') {
+                        mainSwfData = fileData;
+                        mainSwfName = filename;
+                    }
+                }
+            }
+
+            if (mainSwfData) {
+                const ptr = Module._malloc(mainSwfData.length);
+                Module.HEAPU8.set(mainSwfData, ptr);
+                const success = reflashApi.loadSwf(ptr, mainSwfData.length);
+                Module._free(ptr);
+
+                if (success === 1) {
+                    updateHUD({ name: mainSwfName, size: mainSwfData.length }, mainSwfData);
+                } else {
+                    alert("Failed to parse root SWF binary header from ZIP.");
+                }
+            } else {
+                alert("No .swf file found in the ZIP archive.");
+            }
+        } catch (err) {
+            console.error("Failed to extract ZIP archive:", err);
+            alert("Error reading ZIP archive.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function processSwfFile(file) {
+    const reader = new FileReader();
     reader.onload = function(e) {
         const arrayBuffer = e.target.result;
         const byteArray = new Uint8Array(arrayBuffer);
+
+        // Write file to Emscripten virtual filesystem root
+        if (Module.FS && Module.FS.writeFile) {
+            try {
+                Module.FS.writeFile('/' + file.name, byteArray);
+            } catch (err) {
+                console.warn("VFS write warning:", err);
+            }
+        }
 
         // Allocate memory in Wasm heap
         const ptr = Module._malloc(byteArray.length);

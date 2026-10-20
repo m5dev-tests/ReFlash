@@ -160,6 +160,7 @@
             color: #8888aa;
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body id="drop-target">
 
@@ -168,13 +169,13 @@
     <div class="container">
         <div class="canvas-container" id="canvas-wrapper">
             <canvas id="reflash-canvas" width="800" height="600"></canvas>
-            <div class="drop-hint">Drag & Drop any .swf file anywhere or use the picker on the right</div>
+            <div class="drop-hint">Drag & Drop any .swf or .zip archive anywhere or use the picker on the right</div>
         </div>
 
         <div class="panel">
             <div class="control-group">
-                <label for="swf-file-picker">Load Local SWF File</label>
-                <input type="file" id="swf-file-picker" accept=".swf">
+                <label for="swf-file-picker">Load Local SWF or ZIP Archive</label>
+                <input type="file" id="swf-file-picker" accept=".swf, .zip">
             </div>
 
             <div class="hud-panel" id="swf-hud">

@@ -3,11 +3,38 @@
 #include "reflash/avm2_context.hpp"
 #include <zlib.h>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 
 namespace reflash {
 
 static SWFDocument g_current_document;
+
+bool load_movie_from_vfs(const std::string& url, std::vector<uint8_t>& out_buffer) {
+    if (url.empty()) return false;
+    out_buffer.clear();
+
+    std::vector<std::string> paths;
+    if (url[0] != '/') {
+        paths.push_back("/" + url);
+    }
+    paths.push_back(url);
+
+    for (const auto& path : paths) {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (file.is_open()) {
+            std::streamsize size = file.tellg();
+            if (size > 0) {
+                file.seekg(0, std::ios::beg);
+                out_buffer.resize(static_cast<size_t>(size));
+                if (file.read(reinterpret_cast<char*>(out_buffer.data()), size)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
 uint32_t SWFDocument::frame_interval_ms() const {
     // Pixel-Perfect Frame Timing Formula using Adobe internal fixed-point representation
@@ -284,6 +311,15 @@ extern "C" {
 
 REFLASH_EXPORT int reflash_load_swf(const uint8_t* buffer, size_t length) {
     return reflash::g_current_document.parse(buffer, length) ? 1 : 0;
+}
+
+REFLASH_EXPORT int reflash_load_movie(const char* url) {
+    if (!url) return 0;
+    std::vector<uint8_t> buffer;
+    if (reflash::load_movie_from_vfs(url, buffer)) {
+        return reflash::g_current_document.parse(buffer.data(), buffer.size()) ? 1 : 0;
+    }
+    return 0;
 }
 
 REFLASH_EXPORT float reflash_get_width() {
