@@ -149,14 +149,15 @@ private:
 
 } // namespace reflash
 
-// C-linkage exported APIs for Wasm / Web interface
-extern "C" {
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
 #define REFLASH_EXPORT EMSCRIPTEN_KEEPALIVE
 #else
 #define REFLASH_EXPORT
 #endif
+
+// C-linkage exported APIs for Wasm / Web interface
+extern "C" {
 
 REFLASH_EXPORT int reflash_load_swf(const uint8_t* buffer, size_t length);
 REFLASH_EXPORT float reflash_get_width();

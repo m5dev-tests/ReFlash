@@ -4,3 +4,7 @@ build_native/
 *.o
 *.a
 *.so
+node_modules/
+build_wasm/
+build_native/
+build/
