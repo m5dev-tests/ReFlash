@@ -27,6 +27,11 @@ if(EMSCRIPTEN)
         SUFFIX ".js"
     )
 
+    # إضافة فلاج zlib لمرحلة الترجمة (Compilation) عشان يلاقي zlib.h
+    target_compile_options(reflash PRIVATE
+        "-sUSE_ZLIB=1"
+    )
+
     target_link_options(reflash PRIVATE
         "-sWASM=1"
         "-sUSE_WEBGL2=1"
