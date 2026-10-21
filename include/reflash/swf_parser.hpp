@@ -2,6 +2,7 @@
 #define REFLASH_SWF_PARSER_HPP
 
 #include "reflash/swf_stream.hpp"
+#include "reflash/audio_engine.hpp"
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -60,6 +61,7 @@ struct FrameCommand {
 struct TimelineFrame {
     uint32_t frame_index{0};
     std::vector<FrameCommand> commands;
+    std::vector<int16_t> audio_samples;
 };
 
 struct JPEGAsset {
@@ -125,6 +127,7 @@ public:
     const std::unordered_map<uint16_t, DefineSpriteData>& sprites() const { return sprites_; }
     const std::unordered_map<uint16_t, std::string>& symbol_classes() const { return symbol_classes_; }
     const std::vector<TimelineFrame>& timeline_frames() const { return timeline_frames_; }
+    const SoundStreamHeader& sound_stream_header() const { return sound_stream_header_; }
 
 private:
     SWFHeader header_;
@@ -134,6 +137,9 @@ private:
 
     std::vector<SWFTag> tags_;
     std::unordered_map<uint16_t, uint32_t> tag_counts_;
+
+    // Audio stream state
+    SoundStreamHeader sound_stream_header_;
 
     // Assets & Symbol Mappings
     std::unordered_map<uint16_t, JPEGAsset> jpeg_assets_;
@@ -148,6 +154,7 @@ private:
 };
 
 bool load_movie_from_vfs(const std::string& url, std::vector<uint8_t>& out_buffer);
+SWFDocument& get_current_document();
 
 } // namespace reflash
 

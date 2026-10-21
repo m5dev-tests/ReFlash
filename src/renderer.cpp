@@ -1,5 +1,7 @@
 #include "reflash/renderer.hpp"
 #include "reflash/core.hpp"
+#include "reflash/swf_parser.hpp"
+#include "reflash/audio_engine.hpp"
 #include <iostream>
 
 #ifdef __EMSCRIPTEN__
@@ -26,6 +28,7 @@ namespace reflash {
 
 static Renderer g_renderer;
 static Engine g_engine;
+static size_t g_current_frame_idx = 0;
 
 bool Renderer::init() {
 #ifdef __EMSCRIPTEN__
@@ -70,11 +73,30 @@ bool Engine::init(int width, int height) {
         return false;
     }
     initialized_ = true;
+    g_current_frame_idx = 0;
     return true;
 }
 
 void Engine::update(float deltaTime) {
     (void)deltaTime;
+    auto& doc = get_current_document();
+    const auto& frames = doc.timeline_frames();
+    if (!frames.empty()) {
+        if (g_current_frame_idx >= frames.size()) {
+            g_current_frame_idx = 0;
+        }
+
+        const auto& current_frame = frames[g_current_frame_idx];
+        if (!current_frame.audio_samples.empty()) {
+            const auto& snd_hdr = doc.sound_stream_header();
+            reflash_js_play_audio(current_frame.audio_samples.data(),
+                                 static_cast<int>(current_frame.audio_samples.size()),
+                                 snd_hdr.sample_rate_hz(),
+                                 snd_hdr.channels());
+        }
+
+        g_current_frame_idx++;
+    }
 }
 
 void Engine::render() {

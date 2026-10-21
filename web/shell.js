@@ -17,9 +17,46 @@ let reflashApi = {
     getBgColor: null
 };
 
+let audioCtx = null;
+let nextPlayTime = 0;
+
 let frameCount = 0;
 let lastTime = performance.now();
 let fps = 0;
+
+function reflash_js_play_audio(ptr, count, rate, channels) {
+    if (!audioCtx || audioCtx.state !== 'running') {
+        return;
+    }
+
+    if (count <= 0 || !ptr) {
+        return;
+    }
+
+    const numFrames = Math.floor(count / channels);
+    if (numFrames <= 0) return;
+
+    const audioBuf = audioCtx.createBuffer(channels, numFrames, rate);
+    const heapSamples = Module.HEAP16.subarray(ptr >> 1, (ptr >> 1) + count);
+
+    for (let ch = 0; ch < channels; ch++) {
+        const channelData = audioBuf.getChannelData(ch);
+        for (let i = 0; i < numFrames; i++) {
+            const raw = heapSamples[i * channels + ch];
+            channelData[i] = raw / (raw < 0 ? 32768.0 : 32767.0);
+        }
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuf;
+    source.connect(audioCtx.destination);
+
+    nextPlayTime = Math.max(audioCtx.currentTime, nextPlayTime);
+    source.start(nextPlayTime);
+    nextPlayTime += audioBuf.duration;
+}
+
+Module.reflash_js_play_audio = reflash_js_play_audio;
 
 Module.onRuntimeInitialized = function() {
     console.log("ReFlash WebAssembly Engine Module Initialized");
@@ -45,10 +82,37 @@ Module.onRuntimeInitialized = function() {
         document.getElementById('stat-status').textContent = "Init Failed";
     }
 
+    setupAudio();
     setupUI();
     setupDragAndDrop();
     requestAnimationFrame(renderLoop);
 };
+
+function setupAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+    }
+
+    const enableAudioBtn = document.getElementById('audio-enable-btn');
+    const audioHudVal = document.getElementById('hud-audio');
+
+    const unlockAudio = () => {
+        if (audioCtx) {
+            audioCtx.resume().then(() => {
+                if (enableAudioBtn) enableAudioBtn.style.display = 'none';
+                if (audioHudVal) audioHudVal.textContent = "Active (44.1 kHz)";
+            });
+        }
+    };
+
+    if (enableAudioBtn) {
+        enableAudioBtn.addEventListener('click', unlockAudio);
+    }
+
+    window.addEventListener('click', unlockAudio, { once: true });
+    window.addEventListener('touchstart', unlockAudio, { once: true });
+}
 
 function setupUI() {
     const blendSelect = document.getElementById('blend-select');
