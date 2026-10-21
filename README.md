@@ -1,6 +1,6 @@
 # ReFlash ⚡
 
-**ReFlash** is a lightweight, high-performance, open-source Flash Player runtime targeting **WebAssembly (Wasm)** and **WebGL2**. It provides an open-source, GPL-licensed alternative to closed-source solutions, focusing on pixel-accurate 2D rendering, ActionScript display object blend modes (`Normal`, `Add`, `Multiply`, `Screen`, `Invert`/`Difference`), `ColorTransform` matrix arithmetic, a production-grade 2D Flash filter pipeline (`Blur`, `Glow`, `DropShadow`, `Bevel`), and multi-SWF ZIP ingestion.
+**ReFlash** is a lightweight, high-performance, open-source Flash Player runtime targeting **WebAssembly (Wasm)** and **WebGL2**. It provides an open-source, GPL-licensed alternative to closed-source solutions, focusing on pixel-accurate 2D rendering, ActionScript display object blend modes (`Normal`, `Add`, `Multiply`, `Screen`, `Invert`/`Difference`), `ColorTransform` matrix arithmetic, a production-grade 2D Flash filter pipeline (`Blur`, `Glow`, `DropShadow`, `Bevel`), streaming sound engine (Flash ADPCM / raw PCM) via Web Audio API, and multi-SWF ZIP ingestion.
 
 ---
 
@@ -16,6 +16,7 @@ ReFlash/
 ├── include/
 │   └── reflash/
 │       ├── core.hpp            # Engine main loop & lifecycle definitions
+│       ├── audio_engine.hpp    # SoundStreamHead / SoundStreamBlock parsers & Flash ADPCM decoder
 │       ├── renderer.hpp        # WebGL2 rendering pipeline interface & C exports
 │       ├── filter_engine.hpp   # WebGL2 Filter Engine interface & FBO ping-pong pipeline
 │       ├── blend_modes.hpp     # Flash Blend Modes enum & ColorTransform structs
@@ -26,6 +27,7 @@ ReFlash/
 │       └── display_tree.hpp    # ActionScript DisplayObject, MovieClip & matrix tree
 ├── src/
 │   ├── main.cpp                # Native/Wasm entrypoint
+│   ├── audio_engine.cpp        # SWF IMA-ADPCM / raw PCM decoder & WebAssembly C audio exports
 │   ├── renderer.cpp            # WebGL2 / GLES3 state management & C exports
 │   ├── filter_engine.cpp       # Ping-pong FBO filter execution pipeline implementation
 │   ├── blend_modes.cpp         # Software fallback CPU blend arithmetic
@@ -42,15 +44,27 @@ ReFlash/
 │   ├── filter_composite.vert   # Unified filter compositor vertex shader
 │   └── filter_composite.frag   # Unified Glow/DropShadow/Bevel filter compositor
 ├── web/
-│   ├── index.html              # Interactive HTML5 test harness UI & SWF Inspector HUD
-│   └── shell.js                # JS Wasm bridge, drag-and-drop & ZIP archive extraction
+│   ├── index.html              # Interactive HTML5 test harness UI, Audio overlay & SWF Inspector HUD
+│   └── shell.js                # JS Wasm bridge, Web Audio API queue streamer & ZIP archive extraction
 └── tests/
     ├── test_blend_modes.cpp    # CPU unit test suite for blend equations
     ├── test_filters.cpp        # Unit test suite for filter flag unpacking & shadow offset math
+    ├── test_audio.cpp          # Unit test suite for SoundStreamHead unpacking & Flash ADPCM / PCM decoding
     ├── test_swf_parser.cpp     # Unit test suite for SWF bitstream, zlib CWS, & tags
     ├── test_avm2_abc.cpp       # Unit test suite for AVM2 ABC bytecode & version spoofing
     └── test_display_tree.cpp   # Unit test suite for DisplayObject matrix concatenation
 ```
+
+---
+
+## 🔊 Streaming Audio Architecture (Web Audio API)
+
+ReFlash implements streaming audio playback for Flash animations and soundtracks:
+- **SoundStreamHead Parsing (`Tag 18` / `Tag 45`)**: Extracts sampling rate ($5.5\text{ kHz}, 11.025\text{ kHz}, 22.05\text{ kHz}, 44.1\text{ kHz}$), sample size ($8\text{-bit} / 16\text{-bit}$), channel configuration (Mono / Stereo), and compression format (Raw PCM, Flash IMA-ADPCM, MP3).
+- **SoundStreamBlock Decoding (`Tag 19`)**:
+  - **Raw PCM**: Unpacks 8-bit unsigned PCM (-128 offset) or 16-bit signed LE PCM into normalized 16-bit signed integer samples (`int16_t`).
+  - **Flash ADPCM**: Decodes standard SWF IMA-ADPCM delta codes using bitstream predictors and step/index lookup tables.
+- **Web Audio API Bridge**: Decoded PCM buffers are dispatched via C export `reflash_js_play_audio` to JavaScript (`shell.js`). The JS shell converts `int16_t` samples to Float32 `AudioBuffer` objects and queues scheduled playback with `AudioBufferSourceNode` to prevent audio stuttering.
 
 ---
 
@@ -99,7 +113,7 @@ ReFlash features a self-contained WebGL2 filter engine utilizing multi-pass Fram
 - **Two-Pass Box Blur (`filter_blur.frag`)**: Separable horizontal and vertical box filter with fractional edge weights across `passes` iterations.
 - **Unified Composite Shader (`filter_composite.frag`)**: Handles Glow, DropShadow, and Bevel compositing with configurable inner/outer flags, knockout, hideObject, and strength multipliers.
 - **Multi-File ZIP Ingestion**: Supports `.zip` archives containing multiple SWF files. Automatically unpacks archives into Emscripten's virtual filesystem (`FS.writeFile`) and resolves `loadMovie` paths locally.
-- **LoadMovie Event Lifecycle (Issue #3615 Fix)**: Enforces strict load lifecycle (`bytesLoaded` / `bytesTotal`) and gates `onEnterFrame` on loader clips until movie clips are fully initialized.
+- **LoadMovie Event Lifecycle**: Enforces strict load lifecycle (`bytesLoaded` / `bytesTotal`) and gates `onEnterFrame` on loader clips until movie clips are fully initialized.
 
 ---
 

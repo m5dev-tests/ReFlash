@@ -12,6 +12,7 @@ set(REFLASH_SOURCES
     src/blend_modes.cpp
     src/renderer.cpp
     src/filter_engine.cpp
+    src/audio_engine.cpp
     src/swf_stream.cpp
     src/swf_parser.cpp
     src/avm2_context.cpp
@@ -27,7 +28,7 @@ if(EMSCRIPTEN)
         SUFFIX ".js"
     )
 
-    # إضافة فلاج zlib لمرحلة الترجمة (Compilation) عشان يلاقي zlib.h
+    # zlib compile flag
     target_compile_options(reflash PRIVATE
         "-sUSE_ZLIB=1"
     )
@@ -39,7 +40,7 @@ if(EMSCRIPTEN)
         "-sUSE_ZLIB=1"
         "-sALLOW_MEMORY_GROWTH=1"
         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']"
-        "-sEXPORTED_FUNCTIONS=['_init_engine','_load_frame','_set_blend_mode','_set_color_transform','_reflash_load_swf','_reflash_load_movie','_reflash_get_width','_reflash_get_height','_reflash_get_framerate','_reflash_get_frame_count','_reflash_get_version','_reflash_get_as_version','_reflash_get_bg_color','_reflash_get_frame_interval_ms','_reflash_execute_abc','_malloc','_free','_main']"
+        "-sEXPORTED_FUNCTIONS=['_init_engine','_load_frame','_set_blend_mode','_set_color_transform','_reflash_load_swf','_reflash_load_movie','_reflash_get_width','_reflash_get_height','_reflash_get_framerate','_reflash_get_frame_count','_reflash_get_version','_reflash_get_as_version','_reflash_get_bg_color','_reflash_get_frame_interval_ms','_reflash_execute_abc','_reflash_js_play_audio','_malloc','_free','_main']"
     )
 else()
     find_package(ZLIB REQUIRED)
@@ -59,8 +60,15 @@ else()
         tests/test_filters.cpp
     )
 
+    add_executable(test_audio
+        src/swf_stream.cpp
+        src/audio_engine.cpp
+        tests/test_audio.cpp
+    )
+
     add_executable(test_swf_parser
         src/swf_stream.cpp
+        src/audio_engine.cpp
         src/swf_parser.cpp
         src/avm2_context.cpp
         tests/test_swf_parser.cpp
@@ -69,6 +77,7 @@ else()
 
     add_executable(test_avm2_abc
         src/swf_stream.cpp
+        src/audio_engine.cpp
         src/swf_parser.cpp
         src/avm2_context.cpp
         tests/test_avm2_abc.cpp
@@ -79,6 +88,7 @@ else()
         src/blend_modes.cpp
         src/renderer.cpp
         src/filter_engine.cpp
+        src/audio_engine.cpp
         src/swf_stream.cpp
         src/swf_parser.cpp
         src/avm2_context.cpp
@@ -90,6 +100,7 @@ else()
     enable_testing()
     add_test(NAME test_blend_modes COMMAND test_blend_modes)
     add_test(NAME test_filters COMMAND test_filters)
+    add_test(NAME test_audio COMMAND test_audio)
     add_test(NAME test_swf_parser COMMAND test_swf_parser)
     add_test(NAME test_avm2_abc COMMAND test_avm2_abc)
     add_test(NAME test_display_tree COMMAND test_display_tree)

@@ -1,6 +1,7 @@
 #include "reflash/swf_parser.hpp"
 #include "reflash/swf_stream.hpp"
 #include "reflash/avm2_context.hpp"
+#include "reflash/audio_engine.hpp"
 #include <zlib.h>
 #include <cstring>
 #include <fstream>
@@ -9,6 +10,10 @@
 namespace reflash {
 
 static SWFDocument g_current_document;
+
+SWFDocument& get_current_document() {
+    return g_current_document;
+}
 
 bool load_movie_from_vfs(const std::string& url, std::vector<uint8_t>& out_buffer) {
     if (url.empty()) return false;
@@ -85,6 +90,7 @@ bool SWFDocument::parse(const uint8_t* buffer, size_t size) {
     timeline_frames_.clear();
     bg_color_ = 0xFFFFFF;
     is_as3_ = false;
+    sound_stream_header_ = SoundStreamHeader();
 
     // Read signature
     char sig0 = static_cast<char>(buffer[0]);
@@ -177,6 +183,13 @@ void SWFDocument::parse_tags(SWFStream& stream) {
             timeline_frames_.push_back(current_frame);
             current_frame.frame_index++;
             current_frame.commands.clear();
+            current_frame.audio_samples.clear();
+        } else if (tag_code == 18 || tag_code == 45) { // Tag 18 / Tag 45: SoundStreamHead / SoundStreamHead2
+            sound_stream_header_ = AudioEngine::parse_sound_stream_head(stream, tag_code, tag_length);
+        } else if (tag_code == 19) { // Tag 19: SoundStreamBlock
+            if (sound_stream_header_.is_valid) {
+                AudioEngine::decode_sound_stream_block(stream, tag_length, sound_stream_header_, current_frame.audio_samples);
+            }
         } else if (tag_code == 9) { // Tag 9: SetBackgroundColor
             if (tag_length >= 3) {
                 uint8_t r = stream.read_u8();
@@ -190,7 +203,6 @@ void SWFDocument::parse_tags(SWFStream& stream) {
                 is_as3_ = (flags & 0x08) != 0; // Bit 3: ActionScript 3.0 flag
             }
         } else if (tag_code == 72 || tag_code == 82) { // Tag 72/82: DoABC
-            // QUIRK 3: AS3 Gating for DoABC - skip execution if AS3 flag is false
             if (is_as3_) {
                 uint32_t flags = stream.read_u32_le();
                 std::string abc_name = stream.read_string();
@@ -300,7 +312,7 @@ void SWFDocument::parse_tags(SWFStream& stream) {
         stream.seek(tag_next_offset);
     }
 
-    if (!current_frame.commands.empty()) {
+    if (!current_frame.commands.empty() || !current_frame.audio_samples.empty()) {
         timeline_frames_.push_back(current_frame);
     }
 }
