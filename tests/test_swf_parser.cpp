@@ -250,6 +250,90 @@ void test_tag_parser_loop() {
     std::cout << "  -> test_tag_parser_loop PASSED" << std::endl;
 }
 
+void test_parse_time_asset_registration() {
+    std::cout << "[Test] test_parse_time_asset_registration..." << std::endl;
+
+    BitWriter bw;
+    bw.write_ub(12, 5);
+    bw.write_ub(0, 12);
+    bw.write_ub(1000, 12);
+    bw.write_ub(0, 12);
+    bw.write_ub(800, 12);
+    bw.align();
+
+    std::vector<uint8_t> payload = bw.buffer;
+    payload.push_back(0x00);
+    payload.push_back(0x18);
+    payload.push_back(0x01);
+    payload.push_back(0x00);
+
+    // Add DefineBitsJPEG2 (Tag 21) with char_id = 42
+    // TagCode 21, TagLen 6 -> (21 << 6) | 6 = 0x0546 -> LE: 0x46, 0x05
+    payload.push_back(0x46);
+    payload.push_back(0x05);
+    payload.push_back(0x2A); // char_id = 42 LE: 0x2A, 0x00
+    payload.push_back(0x00);
+    payload.push_back(0xFF); // Dummy JPEG payload
+    payload.push_back(0xD8);
+    payload.push_back(0xFF);
+    payload.push_back(0xD9);
+
+    // End Tag
+    payload.push_back(0x00);
+    payload.push_back(0x00);
+
+    uint32_t total_len = 8 + static_cast<uint32_t>(payload.size());
+    std::vector<uint8_t> swf = {
+        'F', 'W', 'S', 8,
+        static_cast<uint8_t>(total_len & 0xFF),
+        static_cast<uint8_t>((total_len >> 8) & 0xFF),
+        static_cast<uint8_t>((total_len >> 16) & 0xFF),
+        static_cast<uint8_t>((total_len >> 24) & 0xFF)
+    };
+    swf.insert(swf.end(), payload.begin(), payload.end());
+
+    reflash::SWFDocument doc;
+    bool ok = doc.parse(swf.data(), swf.size());
+    assert(ok);
+
+    assert(doc.has_asset(42));
+    const reflash::SWFAsset* asset = doc.get_asset(42);
+    assert(asset != nullptr);
+    assert(asset->character_id == 42);
+    assert(asset->tag_code == 21);
+
+    std::cout << "  -> test_parse_time_asset_registration PASSED" << std::endl;
+}
+
+void test_avm1_wait_for_frame() {
+    std::cout << "[Test] test_avm1_wait_for_frame..." << std::endl;
+
+    // Construct AVM1 bytecode:
+    // 1. ActionWaitForFrame (Opcode 0x8A, len = 3): target_frame = 0, skipCount = 2
+    //    Bytecode: 0x8A, 0x03, 0x00, 0x00, 0x00, 0x02
+    // 2. ActionGotoFrame (Opcode 0x81, len = 2): frame = 0
+    //    Bytecode: 0x81, 0x02, 0x00, 0x00, 0x00
+    // 3. ActionPlay (Opcode 0x06)
+    // 4. ActionEnd (Opcode 0x00)
+    std::vector<uint8_t> bytecode = {
+        0x8A, 0x03, 0x00, 0x00, 0x00, 0x02, // ActionWaitForFrame(frame=0, skipCount=2)
+        0x81, 0x02, 0x00, 0x00, 0x00,       // ActionGotoFrame(0)
+        0x06,                               // ActionPlay
+        0x00                                // ActionEnd
+    };
+
+    uint32_t total_frames = 10;
+    reflash::ActionExecutionResult res = reflash::execute_avm1_action(bytecode, total_frames);
+
+    assert(res.skipped_actions);
+    assert(res.skip_count == 2);
+    // Since skipCount = 2, ActionGotoFrame and ActionPlay were skipped!
+    assert(!res.goto_frame);
+    assert(!res.play_requested);
+
+    std::cout << "  -> test_avm1_wait_for_frame PASSED" << std::endl;
+}
+
 int main() {
     std::cout << "==========================================" << std::endl;
     std::cout << "Running ReFlash Phase 2 SWF Parser Unit Tests" << std::endl;
@@ -259,6 +343,8 @@ int main() {
     test_uncompressed_fws_header();
     test_compressed_cws_header();
     test_tag_parser_loop();
+    test_parse_time_asset_registration();
+    test_avm1_wait_for_frame();
 
     std::cout << "==========================================" << std::endl;
     std::cout << "All SWF Parser Unit Tests PASSED!" << std::endl;

@@ -77,11 +77,23 @@ bool Engine::init(int width, int height) {
     return true;
 }
 
+static float g_accumulated_time_ms = 0.0f;
+
 void Engine::update(float deltaTime) {
-    (void)deltaTime;
     auto& doc = get_current_document();
     const auto& frames = doc.timeline_frames();
-    if (!frames.empty()) {
+    if (frames.empty()) return;
+
+    float movie_fps = doc.header().frame_rate;
+    if (movie_fps <= 0.0f) movie_fps = 24.0f;
+    float frame_interval_ms = 1000.0f / movie_fps;
+
+    // Convert deltaTime (seconds) to milliseconds and accumulate
+    g_accumulated_time_ms += deltaTime * 1000.0f;
+
+    while (g_accumulated_time_ms >= frame_interval_ms) {
+        g_accumulated_time_ms -= frame_interval_ms;
+
         if (g_current_frame_idx >= frames.size()) {
             g_current_frame_idx = 0;
         }

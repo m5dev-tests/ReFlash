@@ -15,6 +15,22 @@ enum class SoundCompression : uint8_t {
     UncompressedLittleEndian = 3 // 3 = Uncompressed Little-Endian PCM
 };
 
+
+struct DefineSoundData {
+    uint16_t sound_id{0};
+    uint8_t sound_format{0}; // 2 = MP3
+    uint8_t sound_rate{0};   // 0=5.5k, 1=11k, 2=22k, 3=44k
+    uint8_t sound_size{0};   // 0=8bit, 1=16bit
+    uint8_t sound_type{0};   // 0=mono, 1=stereo
+    uint32_t sample_count{0};
+    std::vector<uint8_t> sound_data;
+};
+
+struct StartSoundData {
+    uint16_t sound_id{0};
+    uint8_t sound_flags{0};
+};
+
 struct SoundStreamHeader {
     uint8_t playback_sound_rate{2}; // 0 = 5.5 kHz, 1 = 11.025 kHz, 2 = 22.05 kHz, 3 = 44.1 kHz
     uint8_t playback_sound_size{1}; // 0 = 8-bit, 1 = 16-bit
@@ -54,6 +70,10 @@ public:
 
 extern "C" {
 REFLASH_EXPORT void reflash_js_play_audio(const int16_t* samples, int sample_count, int sample_rate, int channels);
+
+REFLASH_EXPORT void reflash_js_register_mp3(int sound_id, const uint8_t* data, size_t size);
+REFLASH_EXPORT void reflash_js_start_sound(int sound_id);
+
 }
 
 #endif // REFLASH_AUDIO_ENGINE_HPP
