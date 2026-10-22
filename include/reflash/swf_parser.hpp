@@ -78,6 +78,13 @@ struct SWFTag {
     size_t payload_offset{0};
 };
 
+
+struct SWFAsset {
+    uint16_t character_id{0};
+    uint16_t tag_code{0};
+    std::vector<uint8_t> payload;
+};
+
 struct DefineSpriteData {
     uint16_t sprite_id{0};
     uint16_t frame_count{0};
@@ -120,6 +127,14 @@ public:
     bool is_as3() const { return is_as3_; }
     uint32_t frame_interval_ms() const;
 
+
+    const std::unordered_map<uint16_t, SWFAsset>& asset_dictionary() const { return asset_dictionary_; }
+    bool has_asset(uint16_t character_id) const { return asset_dictionary_.find(character_id) != asset_dictionary_.end(); }
+    const SWFAsset* get_asset(uint16_t character_id) const {
+        auto it = asset_dictionary_.find(character_id);
+        return it != asset_dictionary_.end() ? &it->second : nullptr;
+    }
+
     const std::vector<SWFTag>& tags() const { return tags_; }
     const std::unordered_map<uint16_t, uint32_t>& tag_counts() const { return tag_counts_; }
 
@@ -142,6 +157,7 @@ private:
     SoundStreamHeader sound_stream_header_;
 
     // Assets & Symbol Mappings
+    std::unordered_map<uint16_t, SWFAsset> asset_dictionary_;
     std::unordered_map<uint16_t, JPEGAsset> jpeg_assets_;
     std::unordered_map<uint16_t, DefineSpriteData> sprites_;
     std::unordered_map<uint16_t, std::string> symbol_classes_;
@@ -152,6 +168,18 @@ private:
     bool decompress_zlib(const uint8_t* src, size_t src_len, uint32_t expected_uncompressed_len);
     void parse_tags(SWFStream& stream);
 };
+
+
+struct ActionExecutionResult {
+    bool skipped_actions{false};
+    uint8_t skip_count{0};
+    bool goto_frame{false};
+    uint32_t goto_frame_target{0};
+    bool play_requested{false};
+    bool stop_requested{false};
+};
+
+ActionExecutionResult execute_avm1_action(const std::vector<uint8_t>& bytecode, uint32_t total_frames);
 
 bool load_movie_from_vfs(const std::string& url, std::vector<uint8_t>& out_buffer);
 SWFDocument& get_current_document();
@@ -178,6 +206,8 @@ REFLASH_EXPORT int reflash_get_version();
 REFLASH_EXPORT int reflash_get_as_version();
 REFLASH_EXPORT uint32_t reflash_get_bg_color();
 REFLASH_EXPORT uint32_t reflash_get_frame_interval_ms();
+REFLASH_EXPORT int reflash_has_asset(uint16_t character_id);
+REFLASH_EXPORT int reflash_get_asset_count();
 
 }
 

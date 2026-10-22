@@ -84,6 +84,7 @@ bool SWFDocument::parse(const uint8_t* buffer, size_t size) {
 
     tags_.clear();
     tag_counts_.clear();
+    asset_dictionary_.clear();
     jpeg_assets_.clear();
     sprites_.clear();
     symbol_classes_.clear();
@@ -174,6 +175,32 @@ void SWFDocument::parse_tags(SWFStream& stream) {
         tag.payload_offset = tag_payload_offset;
 
         tags_.push_back(tag);
+
+        // Parse-time registration of definition tags into Global Asset Dictionary
+        if (tag_code == 2 || tag_code == 22 || tag_code == 32 || tag_code == 83 || // DefineShape
+            tag_code == 14 || // DefineSound
+            tag_code == 21 || tag_code == 35 || // DefineBitsJPEG2 / DefineBitsJPEG3
+            tag_code == 20 || tag_code == 36 || // DefineBitsLossless / DefineBitsLossless2
+            tag_code == 10 || tag_code == 48 || tag_code == 62 || // DefineFont / DefineFont2 / DefineFont3
+            tag_code == 39) { // DefineSprite
+
+            if (tag_length >= 2) {
+                uint16_t char_id = stream.read_u16_le();
+                SWFAsset asset;
+                asset.character_id = char_id;
+                asset.tag_code = tag_code;
+                asset.payload.resize(tag_length);
+                // Rewind 2 bytes for character ID
+                stream.seek(tag_payload_offset);
+                for (size_t i = 0; i < tag_length; ++i) {
+                    asset.payload[i] = stream.read_u8();
+                }
+                asset_dictionary_[char_id] = asset;
+                // Reset stream to tag_payload_offset for tag specific parsers
+                stream.seek(tag_payload_offset);
+            }
+        }
+
         tag_counts_[tag_code]++;
 
         // Tag Handling according to Open-Flash spec & Engine Quirks
@@ -184,6 +211,42 @@ void SWFDocument::parse_tags(SWFStream& stream) {
             current_frame.frame_index++;
             current_frame.commands.clear();
             current_frame.audio_samples.clear();
+                } else if (tag_code == 14) { // Tag 14: DefineSound
+            if (tag_length >= 7) {
+                uint16_t sound_id = stream.read_u16_le();
+                uint8_t flags = stream.read_u8();
+                uint8_t sound_format = (flags >> 4) & 0x0F;
+                uint8_t sound_rate = (flags >> 2) & 0x03;
+                uint8_t sound_size = (flags >> 1) & 0x01;
+                uint8_t sound_type = flags & 0x01;
+                uint32_t sample_count = stream.read_u32_le();
+
+                size_t header_len = 2 + 1 + 4;
+                if (tag_length > header_len) {
+                    size_t payload_size = tag_length - header_len;
+                    if (sound_format == 2) { // MP3
+                        if (payload_size > 2) {
+                            uint16_t seek_samples = stream.read_u16_le(); // SI16 SeekSamples
+                            (void)seek_samples;
+                            size_t mp3_size = payload_size - 2;
+                            std::vector<uint8_t> mp3_bytes(mp3_size);
+                            for (size_t i = 0; i < mp3_size; ++i) {
+                                mp3_bytes[i] = stream.read_u8();
+                            }
+                            reflash_js_register_mp3(sound_id, mp3_bytes.data(), mp3_bytes.size());
+                        }
+                    }
+                }
+            }
+        } else if (tag_code == 15) { // Tag 15: StartSound
+            if (tag_length >= 2) {
+                uint16_t sound_id = stream.read_u16_le();
+                if (tag_length >= 3) {
+                    uint8_t sound_flags = stream.read_u8();
+                    (void)sound_flags;
+                }
+                reflash_js_start_sound(sound_id);
+            }
         } else if (tag_code == 18 || tag_code == 45) { // Tag 18 / Tag 45: SoundStreamHead / SoundStreamHead2
             sound_stream_header_ = AudioEngine::parse_sound_stream_head(stream, tag_code, tag_length);
         } else if (tag_code == 19) { // Tag 19: SoundStreamBlock
@@ -364,6 +427,86 @@ REFLASH_EXPORT uint32_t reflash_get_bg_color() {
 
 REFLASH_EXPORT uint32_t reflash_get_frame_interval_ms() {
     return reflash::g_current_document.frame_interval_ms();
+}
+
+}
+
+
+REFLASH_EXPORT int reflash_has_asset(uint16_t character_id) {
+    return reflash::g_current_document.has_asset(character_id) ? 1 : 0;
+}
+
+REFLASH_EXPORT int reflash_get_asset_count() {
+    return static_cast<int>(reflash::g_current_document.asset_dictionary().size());
+}
+
+namespace reflash {
+
+ActionExecutionResult execute_avm1_action(const std::vector<uint8_t>& bytecode, uint32_t total_frames) {
+    ActionExecutionResult res;
+    if (bytecode.empty()) return res;
+
+    SWFStream stream(bytecode);
+    size_t actions_skipped = 0;
+
+    while (stream.bytes_remaining() > 0) {
+        uint8_t opcode = stream.read_u8();
+        if (opcode == 0x00) { // ActionEnd
+            break;
+        }
+
+        uint16_t length = 0;
+        if (opcode >= 0x80) {
+            if (stream.bytes_remaining() < 2) break;
+            length = stream.read_u16_le();
+        }
+
+        if (stream.bytes_remaining() < length) break;
+
+        size_t action_body_offset = stream.tell();
+
+        if (opcode == 0x8A) { // ActionWaitForFrame
+            if (length >= 3) {
+                uint16_t target_frame = stream.read_u16_le();
+                uint8_t skip_count = stream.read_u8();
+
+                // Check condition: frame is loaded
+                if (target_frame < total_frames) {
+                    res.skipped_actions = true;
+                    res.skip_count = skip_count;
+
+                    // Skip the next skip_count actions in the stream
+                    actions_skipped = 0;
+                    while (actions_skipped < skip_count && stream.bytes_remaining() > 0) {
+                        uint8_t next_op = stream.read_u8();
+                        if (next_op == 0x00) break;
+                        uint16_t next_len = 0;
+                        if (next_op >= 0x80) {
+                            if (stream.bytes_remaining() < 2) break;
+                            next_len = stream.read_u16_le();
+                        }
+                        if (stream.bytes_remaining() < next_len) break;
+                        stream.seek(stream.tell() + next_len);
+                        actions_skipped++;
+                    }
+                    continue;
+                }
+            }
+        } else if (opcode == 0x81) { // ActionGotoFrame
+            if (length >= 2) {
+                res.goto_frame = true;
+                res.goto_frame_target = stream.read_u16_le();
+            }
+        } else if (opcode == 0x06) { // ActionPlay
+            res.play_requested = true;
+        } else if (opcode == 0x07) { // ActionStop
+            res.stop_requested = true;
+        }
+
+        stream.seek(action_body_offset + length);
+    }
+
+    return res;
 }
 
 }

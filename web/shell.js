@@ -58,6 +58,34 @@ function reflash_js_play_audio(ptr, count, rate, channels) {
 
 Module.reflash_js_play_audio = reflash_js_play_audio;
 
+const soundLibrary = new Map();
+
+window.reflash_js_register_mp3 = function(soundId, ptr, size) {
+    if (!audioCtx || !ptr || size <= 0) return;
+    const mp3Bytes = new Uint8Array(Module.HEAPU8.buffer, ptr, size).slice();
+    audioCtx.decodeAudioData(mp3Bytes.buffer, (audioBuffer) => {
+        soundLibrary.set(soundId, audioBuffer);
+        console.log(`[ReFlash Audio] MP3 Sound ${soundId} decoded successfully (${audioBuffer.duration.toFixed(1)}s)`);
+    }).catch(err => console.error(`[ReFlash Audio] Failed to decode MP3 ${soundId}:`, err));
+};
+
+window.reflash_js_start_sound = function(soundId) {
+    if (!audioCtx) return;
+    const audioBuffer = soundLibrary.get(soundId);
+    if (audioBuffer && audioCtx.state !== 'closed') {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+        console.log(`[ReFlash Audio] Playing Sound ${soundId}`);
+    }
+};
+
+Module.reflash_js_register_mp3 = window.reflash_js_register_mp3;
+Module.reflash_js_start_sound = window.reflash_js_start_sound;
+
+
 Module.onRuntimeInitialized = function() {
     console.log("ReFlash WebAssembly Engine Module Initialized");
 

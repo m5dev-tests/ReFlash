@@ -4,6 +4,14 @@
 #include <iostream>
 #include <vector>
 
+static std::vector<uint8_t> g_registered_mp3;
+static int g_registered_sound_id = -1;
+
+void test_register_mp3(int sound_id, const uint8_t* data, size_t size) {
+    g_registered_sound_id = sound_id;
+    g_registered_mp3.assign(data, data + size);
+}
+
 void test_sound_stream_head_unpacking() {
     // Construct Tag 18 payload:
     // b0: reserved (0), PlaybackSoundRate=2 (22kHz), PlaybackSoundSize=1 (16-bit), PlaybackSoundType=1 (Stereo)
@@ -75,11 +83,63 @@ void test_adpcm_decoding() {
     std::cout << "test_adpcm_decoding passed! Decoded " << samples.size() << " samples." << std::endl;
 }
 
+void test_mp3_event_sound_seek_samples_strip() {
+    std::cout << "Running test_mp3_event_sound_seek_samples_strip..." << std::endl;
+
+    // Build Tag 14 (DefineSound) payload:
+    // SoundId = 100 (0x0064)
+    // SoundFormat = 2 (MP3), SoundRate = 3 (44kHz), SoundSize = 1 (16bit), SoundType = 1 (Stereo) -> flags = (2<<4)|(3<<2)|(1<<1)|1 = 0x2F
+    // SampleCount = 1000 (0x000003E8)
+    // SeekSamples = 24 (0x0018)
+    // Payload bytes: 0x11, 0x22, 0x33, 0x44
+    std::vector<uint8_t> payload;
+    payload.push_back(0x64); payload.push_back(0x00); // SoundId
+    payload.push_back(0x2F);                          // Flags
+    payload.push_back(0xE8); payload.push_back(0x03); payload.push_back(0x00); payload.push_back(0x00); // SampleCount
+    payload.push_back(0x18); payload.push_back(0x00); // SeekSamples = 24
+    payload.push_back(0x11); payload.push_back(0x22); payload.push_back(0x33); payload.push_back(0x44); // Raw MP3
+
+    uint32_t tag_len = static_cast<uint32_t>(payload.size());
+    reflash::SWFStream stream(payload);
+
+    uint16_t sound_id = stream.read_u16_le();
+    uint8_t flags = stream.read_u8();
+    uint8_t sound_format = (flags >> 4) & 0x0F;
+    uint32_t sample_count = stream.read_u32_le();
+
+    assert(sound_id == 100);
+    assert(sound_format == 2);
+    assert(sample_count == 1000);
+
+    size_t header_len = 2 + 1 + 4;
+    size_t payload_size = tag_len - header_len;
+    uint16_t seek_samples = stream.read_u16_le();
+    assert(seek_samples == 24);
+
+    size_t mp3_size = payload_size - 2;
+    std::vector<uint8_t> mp3_bytes(mp3_size);
+    for (size_t i = 0; i < mp3_size; ++i) {
+        mp3_bytes[i] = stream.read_u8();
+    }
+
+    test_register_mp3(sound_id, mp3_bytes.data(), mp3_bytes.size());
+
+    assert(g_registered_sound_id == 100);
+    assert(g_registered_mp3.size() == 4);
+    assert(g_registered_mp3[0] == 0x11);
+    assert(g_registered_mp3[1] == 0x22);
+    assert(g_registered_mp3[2] == 0x33);
+    assert(g_registered_mp3[3] == 0x44);
+
+    std::cout << "test_mp3_event_sound_seek_samples_strip passed!" << std::endl;
+}
+
 int main() {
     std::cout << "Running ReFlash Audio Engine Unit Tests..." << std::endl;
     test_sound_stream_head_unpacking();
     test_raw_pcm_decoding();
     test_adpcm_decoding();
+    test_mp3_event_sound_seek_samples_strip();
     std::cout << "All Audio Engine Unit Tests Passed!" << std::endl;
     return 0;
 }

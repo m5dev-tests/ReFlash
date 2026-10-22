@@ -171,3 +171,16 @@ extern "C" void reflash_js_play_audio(const int16_t* samples, int sample_count, 
     (void)channels;
 }
 #endif
+
+
+#ifndef __EMSCRIPTEN__
+extern "C" void reflash_js_register_mp3(int sound_id, const uint8_t* data, size_t size) {
+    (void)sound_id;
+    (void)data;
+    (void)size;
+}
+
+extern "C" void reflash_js_start_sound(int sound_id) {
+    (void)sound_id;
+}
+#endif
